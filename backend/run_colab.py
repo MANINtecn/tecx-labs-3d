@@ -11,28 +11,44 @@ INSTRUÇÕES PARA RODAR NO GOOGLE COLAB:
 
 # ================= CÉLULA 1: Instalação das Dependências =================
 CELL_1_INSTALL = """
-!nvidia-smi
-!pip install -q fastapi uvicorn[standard] python-multipart pyngrok rembg trimesh PyMCubes einops transformers huggingface_hub
-!pip install -q git+https://github.com/VAST-AI-Research/TripoSR.git
-print("Dependências do TECX LABS 3D instaladas com sucesso!")
+!pip install -q fastapi uvicorn[standard] python-multipart rembg trimesh PyMCubes scikit-image nest_asyncio pillow fast_simplification
+!wget -q -nc -O cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+!chmod +x cloudflared
+print("✅ Dependências do TECX LABS 3D instaladas com sucesso!")
 """
 
-# ================= CÉLULA 2: Inicialização do Servidor e Túnel Ngrok =================
+# ================= CÉLULA 2: Inicialização do Servidor e Túnel Cloudflare =================
 CELL_2_SERVER = """
-from pyngrok import ngrok
-import uvicorn
+# Clone do repositório oficial TECX LABS 3D
+%cd /content
+!rm -rf tecx-labs-3d
+!git clone https://github.com/MANINtecn/tecx-labs-3d.git
+%cd /content/tecx-labs-3d/backend
+
+import subprocess
 import threading
+import time
+import re
+import nest_asyncio
+nest_asyncio.apply()
 
-# Insira seu token gratuito do ngrok (opcional se usar localtunnel/bore)
-# ngrok.set_auth_token("SEU_TOKEN_NGROK")
+# Inicia o Cloudflare Tunnel
+def start_tunnel():
+    time.sleep(2)
+    proc = subprocess.Popen(["/content/cloudflared", "tunnel", "--url", "http://localhost:8000"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    for line in proc.stdout:
+        match = re.search(r"https://[a-zA-Z0-9\-]+\.trycloudflare\.com", line)
+        if match:
+            url = match.group(0)
+            print("\n" + "="*60)
+            print("🌟 COPIE ESTA URL E COLE NO SEU APLICATIVO:")
+            print(f"👉 {url}")
+            print("="*60 + "\n")
 
-# Abrir túnel público
-public_url = ngrok.connect(8000).public_url
-print(f"🔥 TECX LABS 3D BACKEND ONLINE!")
-print(f"🔗 URL Pública para colar no Web App: {public_url}")
+threading.Thread(target=start_tunnel, daemon=True).start()
 
-# Rodar backend
-!python app.py
+# Inicia o backend FastAPI
+!uvicorn app:app --host 0.0.0.0 --port 8000
 """
 
 print("TECX LABS 3D - Guia de Colab gerado.")

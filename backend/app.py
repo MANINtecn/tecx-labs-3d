@@ -192,6 +192,7 @@ def generate_volumetric_mesh(img: Image.Image, poly_target: int = 30000) -> "tri
             box = trimesh.creation.icosphere(subdivisions=4, radius=1.0)
             return box
 
+    vertices = np.array(vertices, dtype=np.float64)
     # Normalizar escala dos vértices para caixa unitária centrada
     vertices[:, 0] = (vertices[:, 0] - h / 2.0) / (h / 2.0)
     vertices[:, 1] = -(vertices[:, 1] - w / 2.0) / (w / 2.0)  # Inverter eixo Y para manter orientação
@@ -205,7 +206,10 @@ def generate_volumetric_mesh(img: Image.Image, poly_target: int = 30000) -> "tri
     
     # Decimação para o alvo desejado (Low, Mid ou High poly)
     if len(mesh.faces) > poly_target:
-        mesh = mesh.simplify_quadric_decimation(face_count=poly_target)
+        try:
+            mesh = mesh.simplify_quadric_decimation(face_count=poly_target)
+        except Exception as e:
+            logger.warning(f"Aviso na simplificação de faces: {e}. Mantendo malha padrão com {len(mesh.faces)} faces.")
         
     # Calcular coordenadas UV cilíndricas ou planares
     uvs = np.zeros((len(mesh.vertices), 2), dtype=np.float32)

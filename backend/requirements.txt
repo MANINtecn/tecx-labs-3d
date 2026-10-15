@@ -21,6 +21,7 @@ torchaudio>=2.1.0
 # 3D Neural Models & Mesh Processing (TripoSR / Trellis / PyMCubes)
 trimesh[easy]==4.3.1
 PyMCubes==0.1.6
+fast_simplification>=0.1.7
 scipy==1.12.0
 einops==0.7.0
 transformers==4.38.2
