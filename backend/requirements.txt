@@ -1,0 +1,36 @@
+# TECX LABS 3D - Neural Reconstruction Backend Dependencies
+# TECX SoftHouse - AI & 3D Computer Graphics Division
+
+# Core Framework & Server
+fastapi==0.110.0
+uvicorn[standard]==0.29.0
+python-multipart==0.0.9
+pydantic==2.6.4
+
+# Neural Image Processing & Background Removal
+rembg==2.0.55
+pillow==10.3.0
+opencv-python-headless==4.9.0.80
+numpy>=1.24.0,<2.0.0
+
+# PyTorch (GPU CUDA 11.8/12.1 or CPU fallback)
+torch>=2.1.0
+torchvision>=0.16.0
+torchaudio>=2.1.0
+
+# 3D Neural Models & Mesh Processing (TripoSR / Trellis / PyMCubes)
+trimesh[easy]==4.3.1
+PyMCubes==0.1.6
+scipy==1.12.0
+einops==0.7.0
+transformers==4.38.2
+huggingface_hub==0.22.2
+
+# 3D Format Exporters (OBJ, FBX, GLB/GLTF)
+pygltflib==1.16.2
+collada2gltf==1.0.1; platform_system == "Linux"
+
+# Utilities & Networking
+requests==2.31.0
+tqdm==4.66.2
+python-dotenv==1.0.1

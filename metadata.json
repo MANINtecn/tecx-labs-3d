@@ -1,0 +1,6 @@
+{
+  "name": "TECX LABS 3D - Image to 3D Neural Engine",
+  "description": "Suíte proprietária da TECX SoftHouse para geração de modelos 3D ultra-realistas e Game-Ready a partir de imagens com visualizador Three.js e exportação OBJ, GLB e FBX.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
