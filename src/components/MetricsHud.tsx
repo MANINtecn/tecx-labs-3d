@@ -13,6 +13,7 @@ export const MetricsHud: React.FC<MetricsHudProps> = ({ metrics, quality, modelN
     low: { label: 'Low-Poly (Mobile / Retrô)', color: 'text-emerald-400 border-emerald-500/30' },
     mid: { label: 'Mid-Poly (L2 / Mu / Unity)', color: 'text-cyan-400 border-cyan-500/30' },
     high: { label: 'High-Poly (UE5 Nanite / ZBrush)', color: 'text-amber-400 border-amber-500/30' },
+    high_fidelity: { label: 'High-Fidelity (512 Res + Decimação Trimesh)', color: 'text-purple-400 border-purple-500/30' },
   };
 
   return (

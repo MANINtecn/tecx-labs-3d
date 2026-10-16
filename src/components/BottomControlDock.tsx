@@ -11,6 +11,7 @@ import {
   Eye,
   Sliders,
   Sparkles,
+  Columns,
 } from 'lucide-react';
 
 interface BottomControlDockProps {
@@ -25,6 +26,11 @@ interface BottomControlDockProps {
   onResetCamera: () => void;
   onExport: (format: 'obj' | 'glb' | 'fbx') => void;
   isProcessing?: boolean;
+  referenceImage?: string | null;
+  comparisonMode?: 'off' | 'pip' | 'split' | 'overlay';
+  onComparisonModeChange?: (mode: 'off' | 'pip' | 'split' | 'overlay') => void;
+  overlayOpacity?: number;
+  onOverlayOpacityChange?: (opacity: number) => void;
 }
 
 export const BottomControlDock: React.FC<BottomControlDockProps> = ({
@@ -39,9 +45,14 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
   onResetCamera,
   onExport,
   isProcessing = false,
+  referenceImage,
+  comparisonMode = 'pip',
+  onComparisonModeChange,
+  overlayOpacity = 0.5,
+  onOverlayOpacityChange,
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [activeTab, setActiveTab] = useState<'shading' | 'poly' | 'lights' | 'export'>('shading');
+  const [activeTab, setActiveTab] = useState<'shading' | 'poly' | 'lights' | 'export' | 'compare'>('shading');
 
   // Atalho de teclado 'H' para alternar o modo Cinema/Zen
   useEffect(() => {
@@ -134,6 +145,20 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
               <Download className="w-3.5 h-3.5" />
               <span>Exportar</span>
             </button>
+
+            {referenceImage && onComparisonModeChange && (
+              <button
+                onClick={() => setActiveTab('compare')}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                  activeTab === 'compare'
+                    ? 'bg-cyan-600 text-white shadow-sm'
+                    : 'text-cyan-400 hover:text-cyan-200'
+                }`}
+              >
+                <Columns className="w-3.5 h-3.5" />
+                <span>Comparar 2D</span>
+              </button>
+            )}
           </div>
 
           {/* Área de Conteúdo da Aba Ativa */}
@@ -218,6 +243,18 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
                 >
                   High-Poly (~85k UE5)
                 </button>
+                <button
+                  onClick={() => onQualityChange('high_fidelity')}
+                  disabled={isProcessing}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-mono transition-colors cursor-pointer ${
+                    quality === 'high_fidelity'
+                      ? 'bg-purple-500/25 text-purple-300 border border-purple-500/60 font-bold'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Resolução 512 TripoSR + Decimação Trimesh Anti-Artefato"
+                >
+                  High-Fidelity (512 Res)
+                </button>
               </div>
             )}
 
@@ -288,6 +325,51 @@ export const BottomControlDock: React.FC<BottomControlDockProps> = ({
                 >
                   <Download className="w-3 h-3" />
                   .FBX (Unreal/Unity)
+                </button>
+              </div>
+            )}
+
+            {activeTab === 'compare' && onComparisonModeChange && (
+              <div className="flex items-center gap-1.5 bg-[#0f172a] p-1 rounded-xl border border-slate-800">
+                <button
+                  onClick={() => onComparisonModeChange('pip')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-mono transition-colors cursor-pointer ${
+                    comparisonMode === 'pip'
+                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Flutuante
+                </button>
+                <button
+                  onClick={() => onComparisonModeChange('split')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-mono transition-colors cursor-pointer ${
+                    comparisonMode === 'split'
+                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Lado a Lado
+                </button>
+                <button
+                  onClick={() => onComparisonModeChange('overlay')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-mono transition-colors cursor-pointer ${
+                    comparisonMode === 'overlay'
+                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Sobreposição
+                </button>
+                <button
+                  onClick={() => onComparisonModeChange('off')}
+                  className={`px-2 py-1 rounded-lg text-xs font-mono transition-colors cursor-pointer ${
+                    comparisonMode === 'off'
+                      ? 'bg-rose-500/20 text-rose-300 border border-rose-500/50'
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  Ocultar
                 </button>
               </div>
             )}

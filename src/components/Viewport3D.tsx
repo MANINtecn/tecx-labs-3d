@@ -260,25 +260,42 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     if (!current3DObject) return;
 
-    // Clonar e registrar materiais originais
+    // Clonar e registrar materiais originais, garantindo sanitização de geometria
     current3DObject.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         child.castShadow = true;
         child.receiveShadow = true;
+        if (child.geometry) {
+          // Garantir normais e caixas delimitadoras calculadas sem NaN
+          if (!child.geometry.getAttribute('normal')) {
+            child.geometry.computeVertexNormals();
+          }
+          try {
+            child.geometry.computeBoundingBox();
+            child.geometry.computeBoundingSphere();
+          } catch (e) {
+            console.warn('[TECX LABS 3D] Falha ao calcular limites de malha:', e);
+          }
+        }
         originalMaterialsMapRef.current.set(child, child.material);
       }
     });
 
     anchor.add(current3DObject);
 
-    // Ajustar foco da câmera no centro do modelo
+    // Ajustar foco da câmera no centro do modelo com fallback para prevenir NaN
     const bbox = new THREE.Box3().setFromObject(current3DObject);
     const center = bbox.getCenter(_tempVec3);
-    const size = bbox.getSize(new THREE.Vector3()).length();
+    const rawSize = bbox.getSize(new THREE.Vector3()).length();
+    const size = Number.isFinite(rawSize) && rawSize > 0.05 ? rawSize : 1.5;
 
     if (controlsRef.current && cameraRef.current) {
       controlsRef.current.target.copy(center);
-      cameraRef.current.position.set(center.x, center.y + size * 0.45, center.z + size * 1.35);
+      cameraRef.current.position.set(
+        Number.isFinite(center.x) ? center.x : 0,
+        (Number.isFinite(center.y) ? center.y : 0) + size * 0.45,
+        (Number.isFinite(center.z) ? center.z : 0) + size * 1.35
+      );
       controlsRef.current.update();
     }
   }, [current3DObject]);

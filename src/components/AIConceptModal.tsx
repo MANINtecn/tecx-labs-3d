@@ -31,10 +31,10 @@ export const AIConceptModal: React.FC<AIConceptModalProps> = ({
   if (!isOpen) return null;
 
   const quickPrompts = [
-    'Asas do Arcanjo Sagradas Douradas com penas brilhantes de Mu Online',
-    'Adaga Dupla Amaldiçoada Demoníaca Zariche de Lineage 2',
-    'Montante Dragon Slayer pesado com gumes de aço e escamas',
-    'Capacete Tático Cibernético com visor holográfico azul',
+    'Picareta de mineração low-poly game-ready com cabo de madeira',
+    'Espada longa medieval de ferro com guarda ornamentada',
+    'Capacete tático cibernético futurista com visor emissivo',
+    'Estátua ornamental de gárgula de pedra para cenário',
   ];
 
   const handleCreateConcept = async () => {
@@ -212,19 +212,19 @@ export const AIConceptModal: React.FC<AIConceptModalProps> = ({
                   </p>
                   <div className="pt-1">
                     <span className="text-[10px] font-mono text-slate-400 block mb-1">Qualidade:</span>
-                    <div className="flex gap-1.5">
-                      {(['low', 'mid', 'high'] as PolyQuality[]).map((q) => (
+                    <div className="flex flex-wrap gap-1.5">
+                      {(['low', 'mid', 'high', 'high_fidelity'] as PolyQuality[]).map((q) => (
                         <button
                           key={q}
                           type="button"
                           onClick={() => setQuality(q)}
                           className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors ${
                             quality === q
-                              ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500'
+                              ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500 font-bold'
                               : 'bg-slate-900 text-slate-400 border-slate-800'
                           }`}
                         >
-                          {q.toUpperCase()}
+                          {q === 'high_fidelity' ? 'HIGH-FIDELITY (512)' : q.toUpperCase()}
                         </button>
                       ))}
                     </div>

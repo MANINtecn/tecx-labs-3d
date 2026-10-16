@@ -4,24 +4,25 @@ import {
   Image as ImageIcon,
   Sparkles,
   Terminal,
-  Grid,
-  Zap,
+  Activity,
+  CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface TopNavbarProps {
   onOpenUpload: () => void;
-  onOpenGallery: () => void;
   onOpenAIConcept: () => void;
   onOpenPythonHub: () => void;
   isBackendConnected: boolean;
+  gpuInfo?: string;
 }
 
 export const TopNavbar: React.FC<TopNavbarProps> = ({
   onOpenUpload,
-  onOpenGallery,
   onOpenAIConcept,
   onOpenPythonHub,
   isBackendConnected,
+  gpuInfo,
 }) => {
   return (
     <header className="absolute top-0 left-0 right-0 z-20 h-16 bg-[#090d16]/95 border-b border-slate-800/80 px-4 flex items-center justify-between select-none shadow-md">
@@ -36,44 +37,46 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
               TECX LABS 3D
             </span>
             <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-950/80 border border-cyan-800/50 text-cyan-300 font-bold">
-              v1.0 NEURAL
+              TRIPOSR GPU
             </span>
           </div>
           <p className="text-[11px] text-slate-400 font-mono tracking-tight hidden sm:block">
-            TECX SoftHouse — High-Density Image-to-3D Suite
+            TECX SoftHouse — Image-to-3D Neural Production Suite
           </p>
         </div>
       </div>
 
-      {/* Status do Motor (Estático, sem pulsating dots de acordo com as regras de UX) */}
-      <div className="hidden lg:flex items-center gap-2.5 bg-[#0f172a] px-3 py-1.5 rounded-full border border-slate-800 text-xs font-mono">
+      {/* Status do Motor Neural GPU */}
+      <div
+        onClick={onOpenPythonHub}
+        className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-mono cursor-pointer transition-colors ${
+          isBackendConnected
+            ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/40'
+            : 'bg-amber-950/40 border-amber-500/50 text-amber-300 hover:bg-amber-900/40'
+        }`}
+        title="Clique para gerenciar ou conectar a GPU no Colab"
+      >
         <span
           className={`w-2 h-2 rounded-full ${
-            isBackendConnected ? 'bg-emerald-400' : 'bg-cyan-400'
+            isBackendConnected ? 'bg-emerald-400' : 'bg-amber-400'
           }`}
         />
-        <span className="text-slate-300">
-          {isBackendConnected ? 'Servidor Python Conectado (GPU)' : 'Motor 3D WebGPU Ativo'}
+        <span className="font-semibold">
+          {isBackendConnected ? gpuInfo || 'TripoSR GPU T4 Ativa' : 'Servidor GPU Desconectado'}
+        </span>
+        <span className="text-[10px] opacity-75 underline ml-1">
+          {isBackendConnected ? 'Config' : 'Conectar'}
         </span>
       </div>
 
       {/* Ações Principais da Navbar */}
       <div className="flex items-center gap-2">
         <button
-          onClick={onOpenGallery}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#0f172a] hover:bg-slate-800 text-slate-200 border border-slate-700/80 text-xs font-medium transition-colors cursor-pointer"
-        >
-          <Grid className="w-3.5 h-3.5 text-amber-400" />
-          <span className="hidden md:inline">Amostras</span>
-          <span className="hidden sm:inline font-mono text-amber-400">(Mu / L2)</span>
-        </button>
-
-        <button
           onClick={onOpenAIConcept}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#0f172a] hover:bg-slate-800 text-slate-200 border border-slate-700/80 text-xs font-medium transition-colors cursor-pointer"
         >
           <Sparkles className="w-3.5 h-3.5 text-fuchsia-400" />
-          <span className="hidden sm:inline">IA Concept</span>
+          <span className="hidden sm:inline">IA Concept Studio</span>
         </button>
 
         <button
@@ -87,7 +90,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
         <button
           onClick={onOpenPythonHub}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#0f172a] hover:bg-slate-800 text-slate-300 border border-cyan-900/50 hover:border-cyan-500/50 text-xs font-mono transition-colors cursor-pointer"
-          title="Ver código Python (app.py), requirements.txt e Google Colab"
+          title="Ver script do Google Colab e conectar túnel Cloudflare"
         >
           <Terminal className="w-3.5 h-3.5 text-cyan-400" />
           <span className="hidden md:inline">Python & Colab</span>

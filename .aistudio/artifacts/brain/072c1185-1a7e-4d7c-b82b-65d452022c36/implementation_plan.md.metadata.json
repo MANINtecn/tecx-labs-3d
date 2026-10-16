@@ -1,0 +1,6 @@
+{
+  "summary": "Plano de implementação para corrigir os 3 erros de renderização no Three.js e implementar o motor de modelagem 3D Hard-Surface estilo Blender (Low-Poly/Game-Ready com arestas vivas e topologia limpa) a partir de imagens e desenhos 2D, com suporte a análise anatômica visual por IA e exportação para OBJ, GLB e FBX.",
+  "updatedAt": "2026-10-16T12:47:56.021769003Z",
+  "requestFeedback": true,
+  "userFacing": true
+}
