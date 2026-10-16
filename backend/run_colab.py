@@ -183,9 +183,9 @@ async def generate_3d(
         with torch.no_grad():
             scene_codes = tripo_model(tripo_input, device=device)
             try:
-                mesh = tripo_model.extract_mesh(scene_codes, resolution=res, threshold=mc_thresh)[0]
+                mesh = tripo_model.extract_mesh(scene_codes, True, resolution=res, threshold=mc_thresh)[0]
             except TypeError:
-                mesh = tripo_model.extract_mesh(scene_codes, resolution=res)[0]
+                mesh = tripo_model.extract_mesh(scene_codes, True, resolution=res)[0]
         
         print("🧹 Otimizando Topologia...")
         try:

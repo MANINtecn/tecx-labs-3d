@@ -74,6 +74,13 @@
   ```
 - **Fallback de Segurança:** Em caso de exceção no recorte, o pipeline continua sem interromper a geração 3D.
 
+#### 6. Correção do Argumento Posicional Obrigatório do TSR (has_vertex_color)
+- **Diagnóstico:** O método `tripo_model.extract_mesh()` possui o parâmetro `has_vertex_color` como segundo argumento posicional obrigatório (`TSR.extract_mesh(scene_codes, has_vertex_color, ...)`). Ao não passar o booleano posicionalmente, o Python disparava `missing 1 required positional argument: 'has_vertex_color'`.
+- **Solução:** Chamada ajustada para passar `True` como segundo argumento:
+  ```python
+  mesh = tripo_model.extract_mesh(scene_codes, True, resolution=res, threshold=mc_thresh)[0]
+  ```
+
 ---
 
 ## 🖥️ Reformulação da Interface (Padrão Tripo AI)
