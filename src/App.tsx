@@ -1,8 +1,6 @@
 /**
- * TECX LABS 3D - Official Image-to-3D Neural Studio
+ * TECX LABS 3D - Official Image-to-3D Neural Studio (Tripo AI SaaS Profile)
  * TECX SoftHouse - AI & 3D Computer Graphics Division
- *
- * Motor de Reconstrução Neural 360° conectado ao TripoSR (GPU T4)
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -10,47 +8,41 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
-import { ViewMode, PolyQuality, LightingPreset, MeshMetrics, AssetCategory } from './types';
-import { exportToOBJ, exportToGLB, exportToFBX } from './utils/exporters';
+import { ViewMode, PolyQuality, LightingPreset, MeshMetrics } from './types';
+import { exportToOBJ, exportToGLB } from './utils/exporters';
 import { sanitizeMeshGeometry, isValidGlbBuffer } from './utils/meshSanitizer';
-import { buildHardSurfaceAsset } from './utils/procedural3DModeler';
-import { reconstruct3DFromAnyImage } from './utils/universal3DReconstructor';
 
 import { Viewport3D } from './components/Viewport3D';
 import { TopNavbar } from './components/TopNavbar';
 import { BottomControlDock } from './components/BottomControlDock';
 import { MetricsHud } from './components/MetricsHud';
-import { UploadModal } from './components/UploadModal';
 import { PythonHubModal } from './components/PythonHubModal';
-import { AIConceptModal } from './components/AIConceptModal';
-import { ReferenceComparison, ComparisonMode } from './components/ReferenceComparison';
 
 import {
   UploadCloud,
   Sparkles,
   AlertCircle,
   CheckCircle2,
-  Cpu,
-  Layers,
-  ArrowRight,
+  Image as ImageIcon,
   X,
+  Zap,
 } from 'lucide-react';
 
 export default function App() {
-  // Estado 3D Principal (inicia limpo sem simulação fake)
+  // Estado 3D Principal
   const [current3DObject, setCurrent3DObject] = useState<THREE.Object3D | null>(null);
   const [activeModelName, setActiveModelName] = useState<string>('Nenhum modelo carregado');
-
-  // Imagem de Referência 2D e Modos de Comparação (PiP, Split, Ghost Overlay)
-  const [referenceImage, setReferenceImage] = useState<string | null>(null);
-  const [comparisonMode, setComparisonMode] = useState<ComparisonMode>('pip');
-  const [overlayOpacity, setOverlayOpacity] = useState<number>(0.5);
 
   // Modos de Visualização e Renderização
   const [viewMode, setViewMode] = useState<ViewMode>('textured');
   const [quality, setQuality] = useState<PolyQuality>('mid');
   const [lightingPreset, setLightingPreset] = useState<LightingPreset>('studio');
   const [autoRotate, setAutoRotate] = useState<boolean>(false);
+  const [showGrid, setShowGrid] = useState<boolean>(true);
+
+  // Imagem selecionada no estúdio central
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [imageName, setImageName] = useState<string>('Objeto Customizado 3D');
 
   // Métricas Reais do Modelo
   const [metrics, setMetrics] = useState<MeshMetrics>({
@@ -66,31 +58,29 @@ export default function App() {
   const [processingStatus, setProcessingStatus] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Drag & Drop Global
+  // Drag & Drop
   const [isWindowDragging, setIsWindowDragging] = useState<boolean>(false);
+  const [isDropActive, setIsDropActive] = useState<boolean>(false);
 
-  // Conexão com Servidor Python Remoto (Cloudflare / Colab) persistida no localStorage
+  // Conexão com Servidor Python Remoto persistida no localStorage
   const [backendUrl, setBackendUrl] = useState<string>(() => {
     return localStorage.getItem('tecx_colab_url') || '';
   });
   const [isBackendConnected, setIsBackendConnected] = useState<boolean>(false);
-  const [gpuInfo, setGpuInfo] = useState<string>('GPU Colab Desconectada');
 
-  // Modais
-  const [isUploadOpen, setIsUploadOpen] = useState<boolean>(false);
+  // Modal de Conexão
   const [isPythonHubOpen, setIsPythonHubOpen] = useState<boolean>(false);
-  const [isAIConceptOpen, setIsAIConceptOpen] = useState<boolean>(false);
 
-  // Referência para controles orbitais
+  // Referência para controles orbitais e input de arquivo
   const controlsRef = useRef<OrbitControls | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Testar conexão real com o backend do Colab via gateway Node (sem bloqueio de CORS)
+  // Testar conexão com o servidor neural
   const testBackendConnection = useCallback(
     async (customUrl?: string): Promise<boolean> => {
       const target = customUrl !== undefined ? customUrl : backendUrl;
       if (!target.trim()) {
         setIsBackendConnected(false);
-        setGpuInfo('Nenhum servidor conectado');
         return false;
       }
 
@@ -104,41 +94,27 @@ export default function App() {
         const data = await res.json();
         if (data.success) {
           setIsBackendConnected(true);
-          const gpuName = data.data?.gpu || data.data?.gpu_name || 'Tesla T4 GPU Ativa';
-          setGpuInfo(gpuName);
           localStorage.setItem('tecx_colab_url', target.trim());
           setErrorMessage(null);
           return true;
         } else {
           setIsBackendConnected(false);
-          setGpuInfo('Erro na conexão');
           return false;
         }
       } catch {
         setIsBackendConnected(false);
-        setGpuInfo('Desconectado');
         return false;
       }
     },
     [backendUrl]
   );
 
-  // Testar conexão ao iniciar se houver URL salva
   useEffect(() => {
     if (backendUrl) {
       testBackendConnection(backendUrl);
     }
   }, []);
 
-  // Disparar redimensionamento do Three.js ao alternar modos de divisão (Split screen)
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      window.dispatchEvent(new Event('resize'));
-    }, 60);
-    return () => clearTimeout(timer);
-  }, [comparisonMode]);
-
-  // Atualizar e persistir URL do backend
   const handleUpdateBackendUrl = (url: string) => {
     setBackendUrl(url);
     localStorage.setItem('tecx_colab_url', url);
@@ -146,13 +122,11 @@ export default function App() {
       testBackendConnection(url);
     } else {
       setIsBackendConnected(false);
-      setGpuInfo('Nenhum servidor conectado');
     }
   };
 
-  // Carregar qualquer Objeto 3D com sanitização e cálculo seguro de polígonos
+  // Carregar qualquer Objeto 3D na cena
   const loadObjectIntoScene = (object: THREE.Object3D, name: string, serverMetrics?: any) => {
-    // Sanitizar malhas e configurar materiais PBR
     object.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         child.castShadow = true;
@@ -175,19 +149,17 @@ export default function App() {
       }
     });
 
-    // Centralizar e assentar no piso da grade
     const bbox = new THREE.Box3().setFromObject(object);
     const center = bbox.getCenter(new THREE.Vector3());
     const size = bbox.getSize(new THREE.Vector3());
 
     object.position.x -= Number.isFinite(center.x) ? center.x : 0;
     object.position.z -= Number.isFinite(center.z) ? center.z : 0;
-    object.position.y -= Number.isFinite(bbox.min.y) ? bbox.min.y : 0; // assenta no piso Y = 0
+    object.position.y -= Number.isFinite(bbox.min.y) ? bbox.min.y : 0;
 
     setCurrent3DObject(object);
     setActiveModelName(name);
 
-    // Contar polígonos reais da malha carregada
     let totalVerts = 0;
     let totalTris = 0;
     object.traverse((child) => {
@@ -217,9 +189,9 @@ export default function App() {
     setAutoRotate(true);
     setIsProcessing(false);
     setProcessingStatus('');
+    setSelectedImage(null);
   };
 
-  // Carregar modelo GLB 3D Real retornado pelo TripoSR com validação estrita do buffer
   const loadGlbIntoScene = (glbBuffer: ArrayBuffer, name: string, serverMetrics?: any) => {
     if (!isValidGlbBuffer(glbBuffer)) {
       console.error('[TECX LABS 3D] Buffer GLB corrompido ou resposta não binária.');
@@ -236,75 +208,29 @@ export default function App() {
         loadObjectIntoScene(gltf.scene, name, serverMetrics);
       },
       (error) => {
-        console.error('Erro ao interpretar GLB do TripoSR:', error);
-        setErrorMessage('Erro ao carregar o modelo 3D GLB retornado pelo servidor.');
+        console.error('Erro ao interpretar GLB:', error);
+        setErrorMessage('Erro ao interpretar o modelo 3D GLB.');
         setIsProcessing(false);
       }
     );
   };
 
-  // Gerar Modelo 3D Universal a partir de QUALQUER Imagem (Padrão Tripo3D / Meshy)
-  const handleGenerateBlenderAsset = async (
-    name: string,
-    category?: AssetCategory,
-    imageSource?: string | null
-  ) => {
-    setIsProcessing(true);
-    setErrorMessage(null);
-
-    // Se houver imagem enviada (qualquer item, produto, peça, arma, ferramenta, etc.):
-    // Reconstrói a silhueta, contorno e volume 360° exato daquela imagem (Padrão Tripo3D)
-    if (imageSource) {
-      setReferenceImage(imageSource);
-      setComparisonMode('pip');
-      setProcessingStatus(`Reconstruindo geometria 3D volumétrica 360° exata do seu item (Padrão Tripo3D)...`);
-      try {
-        const model = await reconstruct3DFromAnyImage(imageSource, {
-          resolution: 128,
-          depthScale: 0.28,
-        });
-        loadObjectIntoScene(model, name);
-        return;
-      } catch (err: any) {
-        console.warn('Falha na reconstrução direta da imagem:', err);
-      }
-    }
-
-    // Fallback estruturado para demonstração de picareta
-    setProcessingStatus(`Gerando geometria limpa com arestas vivas e materiais PBR...`);
-    try {
-      const model = buildHardSurfaceAsset(category || name, { assetType: 'pickaxe' });
-      loadObjectIntoScene(model, name);
-    } catch (err: any) {
-      console.error('Erro ao construir asset 3D:', err);
-      setErrorMessage('Falha ao gerar o modelo 3D.');
-      setIsProcessing(false);
-    }
-  };
-
-  // Processar imagem via pipeline neural real TripoSR (Sem bolacha / sem simulação)
+  // Processar imagem via pipeline neural
   const handleProcessImage = async (
     imageSource: string,
-    targetQuality: PolyQuality,
-    removeBackground: boolean,
-    name: string,
-    assetCategory: AssetCategory = 'weapon_tool',
-    customThreshold?: number
+    targetQuality: PolyQuality = quality,
+    name: string = imageName
   ) => {
-    // Se não houver servidor GPU conectado, processa diretamente pelo motor Tripo3D local sem emitir erro!
     if (!backendUrl.trim()) {
-      handleGenerateBlenderAsset(name, assetCategory, imageSource);
+      setIsPythonHubOpen(true);
       return;
     }
 
     setIsProcessing(true);
     setErrorMessage(null);
-    setReferenceImage(imageSource);
-    setComparisonMode('pip');
-    setProcessingStatus(`Preparando asset "${name}" para inferência neural TripoSR...`);
+    setProcessingStatus(`Enviando "${name}" para o cluster neural...`);
 
     try {
-      // Obter blob da imagem
       const blob = await (await fetch(imageSource)).blob();
       const file = new File([blob], `${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}.png`, {
         type: blob.type || 'image/png',
@@ -313,15 +239,11 @@ export default function App() {
       const formData = new FormData();
       formData.append('image', file);
       formData.append('quality', targetQuality);
-      formData.append('asset_type', assetCategory);
-      if (customThreshold) {
-        formData.append('threshold', String(customThreshold));
-      }
+      formData.append('asset_type', 'weapon_tool');
       formData.append('targetBackendUrl', backendUrl.trim());
 
-      setProcessingStatus(`Executando tensores neurais no TripoSR (GPU T4 - Reconstrução 360° • Limiar ${customThreshold ? Number(customThreshold).toFixed(2) : '0.16'})...`);
+      setProcessingStatus(`Isolando silhueta e reconstruindo geometria 360°...`);
 
-      // Enviar via Gateway Node (elimina completamente problemas de CORS com túnel Cloudflare)
       const res = await fetch('/api/neural/generate-3d', {
         method: 'POST',
         body: formData,
@@ -330,12 +252,11 @@ export default function App() {
       const data = await res.json();
 
       if (!res.ok || !data.success) {
-        throw new Error(data.error || 'O servidor TripoSR não conseguiu processar a imagem.');
+        throw new Error(data.error || 'O servidor neural não conseguiu processar a imagem.');
       }
 
-      setProcessingStatus('Renderizando malha 3D real na viewport WebGL...');
+      setProcessingStatus('Renderizando modelo 3D no Viewport WebGL...');
 
-      // Decodificar GLB binário retornado
       const binaryStr = atob(data.glbBase64);
       const len = binaryStr.length;
       const bytes = new Uint8Array(len);
@@ -346,13 +267,29 @@ export default function App() {
       loadGlbIntoScene(bytes.buffer, name, data.metrics);
     } catch (err: any) {
       console.error('Falha na geração 3D neural:', err);
-      setErrorMessage(err.message || 'Falha ao processar com TripoSR.');
+      setErrorMessage(err.message || 'Falha ao processar com o servidor neural.');
       setIsProcessing(false);
       setProcessingStatus('');
     }
   };
 
-  // Resetar câmera e foco
+  // Carregamento de arquivo direto
+  const handleFileSelect = (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      alert('Por favor, selecione uma imagem válida (PNG, JPG, WEBP).');
+      return;
+    }
+    const cleanName = file.name.replace(/\.[^/.]+$/, '');
+    setImageName(cleanName);
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const base64 = e.target?.result as string;
+      setSelectedImage(base64);
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleResetCamera = () => {
     if (controlsRef.current) {
       controlsRef.current.reset();
@@ -360,8 +297,7 @@ export default function App() {
     }
   };
 
-  // Exportação 100% gratuita nos formatos .OBJ, .GLB e .FBX
-  const handleExport = (format: 'obj' | 'glb' | 'fbx') => {
+  const handleExport = (format: 'obj' | 'glb') => {
     if (!current3DObject) return;
     const sanitizedName = activeModelName.toLowerCase().replace(/[^a-z0-9]/g, '_');
 
@@ -369,12 +305,10 @@ export default function App() {
       exportToOBJ(current3DObject, `${sanitizedName}.obj`);
     } else if (format === 'glb') {
       exportToGLB(current3DObject, `${sanitizedName}.glb`);
-    } else if (format === 'fbx') {
-      exportToFBX(current3DObject, `${sanitizedName}.fbx`);
     }
   };
 
-  // Drag & drop global
+  // Drag & drop global da janela
   const handleWindowDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     setIsWindowDragging(true);
@@ -390,19 +324,7 @@ export default function App() {
     e.preventDefault();
     setIsWindowDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const file = e.dataTransfer.files[0];
-      if (file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          const result = ev.target?.result as string;
-          handleGenerateBlenderAsset(
-            file.name.replace(/\.[^/.]+$/, ''),
-            'weapon_tool',
-            result
-          );
-        };
-        reader.readAsDataURL(file);
-      }
+      handleFileSelect(e.dataTransfer.files[0]);
     }
   };
 
@@ -411,18 +333,26 @@ export default function App() {
       onDragOver={handleWindowDragOver}
       onDragLeave={handleWindowDragLeave}
       onDrop={handleWindowDrop}
-      className="relative w-screen h-screen bg-[#090b10] overflow-hidden select-none"
+      className="relative w-screen h-screen bg-[#080b12] overflow-hidden select-none font-sans"
     >
-      {/* 1. Navbar Superior com Indicador de Conexão Real */}
-      <TopNavbar
-        onOpenUpload={() => setIsUploadOpen(true)}
-        onOpenAIConcept={() => setIsAIConceptOpen(true)}
-        onOpenPythonHub={() => setIsPythonHubOpen(true)}
-        isBackendConnected={isBackendConnected}
-        gpuInfo={gpuInfo}
+      {/* Input oculto para seleção de arquivos */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={(e) => e.target.files?.[0] && handleFileSelect(e.target.files[0])}
+        className="hidden"
       />
 
-      {/* 2. HUD de Telemetria e Estatísticas Poligonais Reais */}
+      {/* 1. Navbar Superior Minimalista Estilo SaaS */}
+      <TopNavbar
+        onOpenUpload={() => fileInputRef.current?.click()}
+        onOpenPythonHub={() => setIsPythonHubOpen(true)}
+        isBackendConnected={isBackendConnected}
+        modelName={activeModelName}
+      />
+
+      {/* 2. HUD de Métricas Reais do Modelo */}
       {current3DObject && metrics.triangles > 0 && (
         <MetricsHud
           metrics={metrics}
@@ -431,162 +361,222 @@ export default function App() {
         />
       )}
 
-      {/* 3. Viewport 3D Principal (Three.js WebGL) */}
+      {/* 3. Viewport 3D Principal com Gizmo XYZ Interativo */}
       <Viewport3D
         current3DObject={current3DObject}
         viewMode={viewMode}
         lightingPreset={lightingPreset}
         autoRotate={autoRotate}
+        showGrid={showGrid}
         onSceneReady={(controls) => {
           controlsRef.current = controls;
         }}
       />
 
-      {/* Tela Limpa de Entrada do Estúdio (Estilo Meshy / Tripo3D) - Sem simulações ou dados falsos */}
+      {/* 4. Campo de Upload Direto no Centro da Tela (Estilo Tripo AI) */}
       {!current3DObject && !isProcessing && (
         <div className="absolute inset-0 z-10 flex items-center justify-center p-4 pointer-events-none">
-          <div className="bg-[#0b0f19]/95 border border-cyan-800/40 rounded-3xl p-6 sm:p-8 max-w-lg w-full text-center shadow-2xl backdrop-blur-md pointer-events-auto space-y-5">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-cyan-500 to-indigo-600 mx-auto flex items-center justify-center shadow-lg shadow-cyan-500/25 border border-cyan-400/40">
-              <UploadCloud className="w-8 h-8 text-white" />
-            </div>
-
+          <div className="bg-[#0b0f19]/95 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-lg w-full text-center shadow-2xl backdrop-blur-md pointer-events-auto space-y-5">
+            {/* Cabeçalho do Estúdio */}
             <div>
-              <h2 className="text-xl sm:text-2xl font-black text-white font-['Chakra_Petch',sans-serif] tracking-wide">
-                TECX LABS 3D STUDIO
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950/60 border border-cyan-800/50 text-cyan-300 text-xs font-mono mb-2">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>TECX LABS 3D STUDIO</span>
+              </div>
+              <h2 className="text-xl sm:text-2xl font-black text-white tracking-wide">
+                Image-to-3D Asset Generator
               </h2>
-              <p className="text-xs sm:text-sm text-slate-300 mt-1.5 leading-relaxed font-sans">
-                Gere modelos 3D volumétricos reais (360°) a partir de qualquer imagem 2D (armas, picaretas, personagens, veículos, armaduras) com o motor neural <strong>TripoSR</strong>.
+              <p className="text-xs text-slate-400 mt-1">
+                Arraste um desenho ou foto de arma, ferramenta, armadura ou NPC para criar uma malha 3D real.
               </p>
             </div>
 
-            {/* Status da GPU Conectada */}
+            {/* Status do Servidor */}
             <div
               onClick={() => setIsPythonHubOpen(true)}
-              className={`p-3.5 rounded-xl border text-xs font-mono flex items-center justify-between cursor-pointer transition-colors ${
+              className={`p-2.5 rounded-xl border text-xs font-mono flex items-center justify-between cursor-pointer transition-colors ${
                 isBackendConnected
-                  ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/40'
-                  : 'bg-amber-950/40 border-amber-500/50 text-amber-300 hover:bg-amber-900/40'
+                  ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/40'
+                  : 'bg-amber-950/40 border-amber-500/40 text-amber-300 hover:bg-amber-900/40'
               }`}
             >
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2">
                 <span
-                  className={`w-2.5 h-2.5 rounded-full ${
+                  className={`w-2 h-2 rounded-full ${
                     isBackendConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
                   }`}
                 />
-                <span className="font-bold">
-                  {isBackendConnected ? 'TripoSR GPU T4 Conectado' : 'Conectar Servidor GPU (Colab)'}
+                <span className="font-semibold">
+                  {isBackendConnected ? 'Servidor Neural Conectado' : 'Servidor Neural Desconectado'}
                 </span>
               </div>
-              <span className="text-[11px] underline flex items-center gap-1">
-                {isBackendConnected ? gpuInfo : 'Configurar Link Cloudflare →'}
+              <span className="text-[11px] underline">
+                {isBackendConnected ? 'Online' : 'Conectar Servidor →'}
               </span>
             </div>
 
-            {/* Botões de Ação Imediata */}
-            <div className="space-y-2 pt-1">
-              <button
-                onClick={() => handleGenerateBlenderAsset('Picareta Hard-Surface Low-Poly', 'weapon_tool')}
-                className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-lg shadow-emerald-600/25 border border-emerald-400/40 transition-all cursor-pointer flex items-center justify-center gap-2"
+            {/* Caixa Interativa de Upload / Arraste Direto */}
+            {!selectedImage ? (
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDropActive(true);
+                }}
+                onDragLeave={() => setIsDropActive(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDropActive(false);
+                  if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                    handleFileSelect(e.dataTransfer.files[0]);
+                  }
+                }}
+                onClick={() => fileInputRef.current?.click()}
+                className={`flex flex-col items-center justify-center p-8 rounded-2xl border-2 border-dashed transition-all cursor-pointer ${
+                  isDropActive
+                    ? 'border-cyan-400 bg-cyan-950/30 scale-[0.99]'
+                    : 'border-slate-700/80 hover:border-cyan-500 bg-slate-900/40 hover:bg-slate-900/70'
+                }`}
               >
-                <CheckCircle2 className="w-4 h-4 text-emerald-200" />
-                <span>Carregar Amostra de Teste (Picareta 3D)</span>
-              </button>
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-cyan-500 to-indigo-600 flex items-center justify-center text-white mb-3 shadow-lg shadow-cyan-500/20">
+                  <UploadCloud className="w-7 h-7" />
+                </div>
+                <p className="text-sm font-bold text-white mb-1">
+                  Arraste sua imagem aqui ou clique para selecionar
+                </p>
+                <p className="text-xs text-slate-400">
+                  Abre a janela de arquivos do computador de primeira (PNG, JPG, WEBP)
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Preview da Imagem Selecionada */}
+                <div className="p-3.5 rounded-xl border border-slate-700 bg-slate-900/80 flex items-center gap-3.5">
+                  <div className="w-16 h-16 rounded-lg bg-black/60 border border-slate-700 overflow-hidden flex items-center justify-center shrink-0">
+                    <img
+                      src={selectedImage}
+                      alt="Preview"
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                  <div className="flex-1 text-left min-w-0">
+                    <p className="text-[11px] text-slate-400">Imagem Carregada</p>
+                    <p className="text-xs font-bold text-white truncate">{imageName}</p>
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="mt-1 text-xs text-cyan-400 hover:text-cyan-300 underline cursor-pointer"
+                    >
+                      Trocar imagem
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => setSelectedImage(null)}
+                    className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+                    title="Remover"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => setIsUploadOpen(true)}
-                  className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white font-bold text-xs shadow-lg shadow-cyan-600/25 border border-cyan-400/40 transition-all cursor-pointer flex items-center justify-center gap-2"
-                >
-                  <UploadCloud className="w-4 h-4" />
-                  <span>Subir Imagem 2D</span>
-                </button>
+                {/* Seletor de Resolução */}
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: 'low' as PolyQuality, label: 'Rápido', desc: '128' },
+                    { id: 'mid' as PolyQuality, label: 'Equilibrado', desc: '256' },
+                    { id: 'high' as PolyQuality, label: 'Ultra HD', desc: '320' },
+                  ].map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setQuality(item.id)}
+                      className={`p-2 rounded-xl border text-center transition-all cursor-pointer ${
+                        quality === item.id
+                          ? 'bg-cyan-950/60 border-cyan-500 text-white shadow-sm shadow-cyan-500/20'
+                          : 'bg-slate-900/40 border-slate-800 text-slate-400 hover:text-slate-300'
+                      }`}
+                    >
+                      <p className="text-xs font-bold">{item.label}</p>
+                      <p className="text-[10px] opacity-75">{item.desc} res</p>
+                    </button>
+                  ))}
+                </div>
 
+                {/* Botão de Geração */}
                 <button
-                  onClick={() => setIsAIConceptOpen(true)}
-                  className="py-2.5 px-3 rounded-xl bg-[#0f172a] hover:bg-slate-800 text-slate-200 font-semibold text-xs border border-slate-700 transition-colors cursor-pointer flex items-center justify-center gap-2"
+                  onClick={() => handleProcessImage(selectedImage, quality, imageName)}
+                  disabled={!isBackendConnected}
+                  className={`w-full py-3.5 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all ${
+                    isBackendConnected
+                      ? 'bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white shadow-lg shadow-cyan-500/25 cursor-pointer'
+                      : 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed'
+                  }`}
                 >
-                  <Sparkles className="w-4 h-4 text-fuchsia-400" />
-                  <span>IA Concept Studio</span>
+                  <Sparkles className="w-4 h-4" />
+                  <span>{isBackendConnected ? 'Gerar Modelo 3D Agora' : 'Conectar Servidor Primeiro'}</span>
                 </button>
               </div>
-            </div>
-
-            <p className="text-[11px] text-slate-400 font-mono">
-              💡 Arraste qualquer imagem 2D diretamente na viewport para iniciar.
-            </p>
+            )}
           </div>
         </div>
       )}
 
-      {/* Banner de Erro em caso de Falha */}
+      {/* Banner de Erro */}
       {errorMessage && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 bg-red-950/90 border border-red-500/60 rounded-xl px-4 py-3 shadow-2xl flex items-center gap-3 text-xs text-red-200 max-w-lg">
           <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
           <div className="flex-1 font-sans">{errorMessage}</div>
           <button
             onClick={() => setErrorMessage(null)}
-            className="text-red-400 hover:text-white text-xs font-bold px-1"
+            className="text-red-400 hover:text-white text-xs font-bold px-1 cursor-pointer"
           >
             ✕
           </button>
         </div>
       )}
 
-      {/* 4. Dock Inferior Compacto e Retrátil */}
+      {/* 5. Dock Inferior Flutuante Minimalista (Tripo Style) */}
       {current3DObject && (
         <BottomControlDock
           viewMode={viewMode}
           onViewModeChange={setViewMode}
-          quality={quality}
-          onQualityChange={(newQ) => setQuality(newQ)}
-          lightingPreset={lightingPreset}
-          onLightingPresetChange={setLightingPreset}
           autoRotate={autoRotate}
           onToggleAutoRotate={() => setAutoRotate(!autoRotate)}
           onResetCamera={handleResetCamera}
+          showGrid={showGrid}
+          onToggleGrid={() => setShowGrid(!showGrid)}
           onExport={handleExport}
-          isProcessing={isProcessing}
+          hasModel={!!current3DObject}
         />
       )}
 
-      {/* Overlay de Arraste Global (Drag & Drop) */}
+      {/* Overlay de Drag & Drop Global */}
       {isWindowDragging && (
-        <div className="absolute inset-0 z-50 bg-cyan-950/80 border-4 border-dashed border-cyan-400 flex flex-col items-center justify-center pointer-events-none">
-          <UploadCloud className="w-20 h-20 text-cyan-300 animate-bounce" />
-          <h2 className="text-2xl font-black text-white mt-4 font-['Chakra_Petch',sans-serif] tracking-wider">
+        <div className="absolute inset-0 z-50 bg-cyan-950/85 border-4 border-dashed border-cyan-400 flex flex-col items-center justify-center pointer-events-none">
+          <UploadCloud className="w-16 h-16 text-cyan-300 animate-bounce" />
+          <h2 className="text-xl font-bold text-white mt-3 tracking-wider">
             SOLTE SUA IMAGEM 2D AQUI
           </h2>
           <p className="text-xs text-cyan-200 mt-1 font-mono">
-            O TripoSR executará a reconstrução volumétrica 360° na GPU.
+            A imagem será processada pelo cluster neural.
           </p>
         </div>
       )}
 
       {/* Indicador de Processamento em Andamento */}
       {isProcessing && (
-        <div className="absolute top-20 right-4 z-40 bg-[#0b0f19] border border-cyan-500/60 rounded-2xl p-4 shadow-2xl flex items-center gap-3 max-w-md">
-          <div className="w-6 h-6 border-3 border-cyan-400 border-t-transparent rounded-full animate-spin shrink-0" />
+        <div className="absolute top-20 right-4 z-40 bg-[#0b0f19]/95 border border-cyan-500/60 rounded-2xl p-4 shadow-2xl flex items-center gap-3 max-w-md backdrop-blur-md">
+          <div className="w-5 h-5 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin shrink-0" />
           <div>
             <p className="text-xs font-mono font-bold text-cyan-300">
-              {processingStatus || 'Processando modelo 3D neural...'}
+              {processingStatus || 'Processando modelo 3D...'}
             </p>
-            <p className="text-[10px] text-slate-400 mt-0.5 font-sans">
-              Executando tensores neurais na GPU T4 (Tempo estimado: 3 a 8s)
+            <p className="text-[10px] text-slate-400 mt-0.5">
+              Isolamento de silhueta e escultura volumétrica 360°
             </p>
           </div>
         </div>
       )}
 
-      {/* 5. Modais de Suporte */}
-      <UploadModal
-        isOpen={isUploadOpen}
-        onClose={() => setIsUploadOpen(false)}
-        onProcessImage={handleProcessImage}
-        onGenerateBlenderAsset={handleGenerateBlenderAsset}
-        isProcessing={isProcessing}
-      />
-
+      {/* Modal de Conexão */}
       <PythonHubModal
         isOpen={isPythonHubOpen}
         onClose={() => setIsPythonHubOpen(false)}
@@ -594,16 +584,6 @@ export default function App() {
         onUpdateBackendUrl={handleUpdateBackendUrl}
         isBackendConnected={isBackendConnected}
         onTestConnection={() => testBackendConnection(backendUrl)}
-        gpuInfo={gpuInfo}
-      />
-
-      <AIConceptModal
-        isOpen={isAIConceptOpen}
-        onClose={() => setIsAIConceptOpen(false)}
-        onGenerateFromConcept={(imgUrl, name) => {
-          handleGenerateBlenderAsset(name, 'weapon_tool', imgUrl);
-        }}
-        isProcessing={isProcessing}
       />
     </div>
   );

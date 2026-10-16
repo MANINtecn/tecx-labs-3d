@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { ViewHelper } from 'three/examples/jsm/helpers/ViewHelper.js';
 import { ViewMode, LightingPreset } from '../types';
 
 interface Viewport3DProps {
@@ -9,6 +10,7 @@ interface Viewport3DProps {
   viewMode: ViewMode;
   lightingPreset: LightingPreset;
   autoRotate: boolean;
+  showGrid?: boolean;
   onSceneReady?: (controls: OrbitControls) => void;
 }
 
@@ -20,6 +22,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   viewMode,
   lightingPreset,
   autoRotate,
+  showGrid = true,
   onSceneReady,
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -28,6 +31,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const modelAnchorGroupRef = useRef<THREE.Group>(new THREE.Group());
+  const gridHelperRef = useRef<THREE.GridHelper | null>(null);
+  const axesHelperRef = useRef<THREE.AxesHelper | null>(null);
   const lightsRef = useRef<{
     keyLight: THREE.DirectionalLight;
     fillLight: THREE.HemisphereLight;
@@ -37,7 +42,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
   // Armazenar materiais originais para restauração em modos wireframe/clay
   const originalMaterialsMapRef = useRef<Map<THREE.Mesh, THREE.Material | THREE.Material[]>>(new Map());
 
-  // Inicialização estável do Canvas Three.js (Executa apenas uma vez no ciclo)
+  // Inicialização do Canvas Three.js com ViewHelper (Gizmo Interativo XYZ)
   useEffect(() => {
     const container = mountRef.current;
     if (!container) return;
@@ -47,18 +52,22 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
 
     // 1. Cena com Fog atmosférico sintonizado com o fundo escuro do estúdio
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0b0d13);
-    scene.fog = new THREE.FogExp2(0x0b0d13, 0.045);
+    scene.background = new THREE.Color(0x0a0d14);
+    scene.fog = new THREE.FogExp2(0x0a0d14, 0.04);
     sceneRef.current = scene;
 
     // 2. Câmera Perspectiva
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
-    camera.position.set(0, 1.8, 4.6);
+    camera.position.set(0, 1.6, 4.2);
     cameraRef.current = camera;
 
     // 3. Renderer com PBR, ACESFilmic e sRGB
     const isHeadless = navigator.webdriver || /HeadlessChrome/i.test(navigator.userAgent);
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: false,
+      powerPreference: 'high-performance',
+    });
     renderer.setSize(width, height);
     renderer.setPixelRatio(isHeadless ? 1 : Math.min(window.devicePixelRatio, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -66,6 +75,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     renderer.toneMappingExposure = 1.15;
     renderer.shadowMap.enabled = !isHeadless;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.autoClear = false; // Necessário para sobrepor o Gizmo ViewHelper
     rendererRef.current = renderer;
 
     container.appendChild(renderer.domElement);
@@ -129,19 +139,25 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     contactShadow.position.y = 0.002;
     scene.add(contactShadow);
 
-    // 8. Grade de Estúdio Hexagonal / Polar CAD
+    // 8. Grade de Estúdio Hexagonal / Polar CAD + Eixos Centrais
     const gridHelper = new THREE.GridHelper(10, 24, 0x06b6d4, 0x1e293b);
     gridHelper.position.y = 0;
     scene.add(gridHelper);
+    gridHelperRef.current = gridHelper;
+
+    const axesHelper = new THREE.AxesHelper(1.2);
+    axesHelper.position.y = 0.005;
+    scene.add(axesHelper);
+    axesHelperRef.current = axesHelper;
 
     // 9. OrbitControls com Amortecimento Exponencial
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.06;
     controls.maxPolarAngle = Math.PI / 2 - 0.01; // Não penetra sob o piso
-    controls.minDistance = 0.8;
-    controls.maxDistance = 14;
-    controls.target.set(0, 0.8, 0);
+    controls.minDistance = 0.6;
+    controls.maxDistance = 15;
+    controls.target.set(0, 0.7, 0);
     controls.update();
     controlsRef.current = controls;
 
@@ -149,16 +165,32 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       onSceneReady(controls);
     }
 
-    // 10. Pré-aquecer shaders
+    // 10. Gizmo Interativo 3D de Coordenadas XYZ (ViewHelper Oficial Three.js)
+    const viewHelper = new ViewHelper(camera, renderer.domElement);
+    viewHelper.center = controls.target;
+    // Posiciona o gizmo no canto superior direito (abaixo da barra superior)
+    (viewHelper as any).location = {
+      top: 76,
+      right: 24,
+      bottom: null,
+      left: null,
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      viewHelper.handleClick(event);
+    };
+    renderer.domElement.addEventListener('pointerup', handlePointerUp);
+
+    // 11. Pré-aquecer shaders
     renderer.compile(scene, camera);
 
-    // 11. Loop de Renderização a 60fps
+    // 12. Loop de Renderização a 60fps
     let animationFrameId: number;
     let lastTime = performance.now();
 
     const animate = (time: number) => {
       animationFrameId = requestAnimationFrame(animate);
-      const dt = Math.min((time - lastTime) / 1000, 0.1);
+      const delta = Math.min((time - lastTime) / 1000, 0.1);
       lastTime = time;
 
       if (controlsRef.current) {
@@ -167,12 +199,19 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         controlsRef.current.update();
       }
 
+      // Anima transição da câmera quando o usuário clica nos eixos X, Y ou Z do gizmo
+      if (viewHelper.animating) {
+        viewHelper.update(delta);
+      }
+
+      renderer.clear();
       renderer.render(scene, camera);
+      viewHelper.render(renderer);
     };
 
     animationFrameId = requestAnimationFrame(animate);
 
-    // 12. Tratamento de redimensionamento de janela
+    // 13. Tratamento de redimensionamento de janela
     const handleResize = () => {
       if (!container) return;
       const w = container.clientWidth;
@@ -187,6 +226,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
     return () => {
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', handleResize);
+      renderer.domElement.removeEventListener('pointerup', handlePointerUp);
+      viewHelper.dispose();
       renderer.dispose();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
@@ -200,6 +241,16 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
       controlsRef.current.autoRotate = autoRotate;
     }
   }, [autoRotate]);
+
+  // Alternar visibilidade da grade e dos eixos de piso
+  useEffect(() => {
+    if (gridHelperRef.current) {
+      gridHelperRef.current.visible = showGrid;
+    }
+    if (axesHelperRef.current) {
+      axesHelperRef.current.visible = showGrid;
+    }
+  }, [showGrid]);
 
   // Atualizar Iluminação conforme o preset
   useEffect(() => {
@@ -266,7 +317,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         child.castShadow = true;
         child.receiveShadow = true;
         if (child.geometry) {
-          // Garantir normais e caixas delimitadoras calculadas sem NaN
           if (!child.geometry.getAttribute('normal')) {
             child.geometry.computeVertexNormals();
           }
@@ -311,22 +361,19 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({
         if (viewMode === 'textured') {
           if (origMat) child.material = origMat;
         } else if (viewMode === 'shaded') {
-          // Modo Studio Clay / MatCap Neutro
           child.material = new THREE.MeshStandardMaterial({
             color: 0x94a3b8,
-            metalness: 0.2,
-            roughness: 0.5,
+            metalness: 0.15,
+            roughness: 0.6,
             wireframe: false,
           });
         } else if (viewMode === 'wireframe') {
-          // Topologia limpa com Wireframe destacado
           child.material = new THREE.MeshStandardMaterial({
             color: 0x06b6d4,
             wireframe: true,
             roughness: 0.3,
           });
         } else if (viewMode === 'xray') {
-          // Raio-X volumétrico
           child.material = new THREE.MeshPhysicalMaterial({
             color: 0x38bdf8,
             transparent: true,
