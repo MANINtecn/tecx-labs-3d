@@ -69,6 +69,20 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Endpoint para entregar o script oficial do Colab para a interface web
+app.get('/api/files/content/run_colab.py', (req, res) => {
+  try {
+    const colabScriptPath = path.join(__dirname, 'backend', 'run_colab.py');
+    if (fs.existsSync(colabScriptPath)) {
+      const content = fs.readFileSync(colabScriptPath, 'utf-8');
+      return res.json({ content });
+    }
+    return res.status(404).json({ error: 'Arquivo run_colab.py não encontrado.' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // Endpoint para testar conexão com o servidor remoto (Colab / Cloudflare) sem problemas de CORS
 app.post('/api/neural/test-connection', async (req, res) => {
   const { url } = req.body;
@@ -194,6 +208,8 @@ app.post('/api/neural/generate-3d', upload.single('image'), async (req, res) => 
         metrics: colabData.metrics,
         glbBase64: colabData.glb_base64 || colabData.glbBase64,
         downloads: colabData.downloads,
+        server_logs: colabData.server_logs || [],
+        segmented_preview: colabData.segmented_preview || null,
       });
     }
 

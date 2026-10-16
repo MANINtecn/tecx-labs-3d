@@ -1,14 +1,14 @@
 # ===============================================================
-# TECX LABS 3D - SERVIDOR PROPRIETÁRIO NEURAL
+# TECX LABS 3D - SERVIDOR NEURAL PROPRIETÁRIO (TECX CORE ENGINE)
 # TECX SoftHouse - AI & 3D Computer Graphics Division
 # ===============================================================
 
 COLAB_COMPLETE_SCRIPT = '''# ===============================================================
-# TECX LABS 3D - SERVIDOR NEURAL PROPRIETÁRIO (TECX CORE ENGINE)
+# TECX LABS 3D - SERVIDOR NEURAL PROPRIETÁRIO (TECX CORE ENGINE v2.2)
 # ===============================================================
 
 # 1. Instalar bibliotecas essenciais sem conflito de compilação
-!pip install -q "torchvision" "transformers" "omegaconf" "einops" "huggingface_hub" "trimesh" "PyMCubes" "fast-simplification" "fastapi" "uvicorn[standard]" "python-multipart" "nest_asyncio"
+!pip install -q "torchvision" "transformers" "omegaconf" "einops" "huggingface_hub" "trimesh" "PyMCubes" "scipy" "networkx" "fastapi" "uvicorn[standard]" "python-multipart" "nest_asyncio"
 
 import nest_asyncio
 nest_asyncio.apply()
@@ -23,7 +23,7 @@ nest_asyncio.apply()
 !wget -q -nc https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
 !dpkg -i cloudflared-linux-amd64.deb > /dev/null 2>&1
 
-# 4. Injetar módulo virtual torchmcubes (PyMCubes C++ de alta precisão)
+# 4. Injetar módulo virtual torchmcubes (Zero-centered isosurface)
 import sys, types, base64, traceback
 import torch
 import numpy as np
@@ -31,7 +31,7 @@ import mcubes
 
 fake_torchmcubes = types.ModuleType("torchmcubes")
 
-def marching_cubes_adapter(volume, threshold=0.18):
+def marching_cubes_adapter(volume, threshold=0.0):
     if isinstance(volume, torch.Tensor):
         vol_np = volume.detach().cpu().numpy()
         device = volume.device
@@ -39,11 +39,8 @@ def marching_cubes_adapter(volume, threshold=0.18):
         vol_np = np.asarray(volume)
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-    t = float(threshold)
-    v_max = float(vol_np.max()) if len(vol_np) > 0 else 1.0
-    actual_thresh = (t * 100.0) if (v_max > 2.0 and t <= 1.0) else t
-
-    verts, faces = mcubes.marching_cubes(vol_np, actual_thresh)
+    # TripoSR já subtrai o threshold internamente; a isosuperfície exata é 0.0
+    verts, faces = mcubes.marching_cubes(vol_np, 0.0)
     verts_t = torch.from_numpy(verts.copy()).float().to(device)
     faces_t = torch.from_numpy(faces.copy().astype(np.int64)).long().to(device)
     return verts_t, faces_t
@@ -87,8 +84,8 @@ print("✅ Motor 3D 360° Pronto!")
 
 os.makedirs("outputs", exist_ok=True)
 
-# 6. Pipeline de Pré-processamento de Imagem
-def remove_background_neural(img: Image.Image) -> Image.Image:
+# 6. Pipeline de Pré-processamento com Diagnóstico e Desempacotamento de Tensor
+def remove_background_neural(img: Image.Image, logs: list) -> Image.Image:
     \"\"\"Isola a silhueta da picareta/objeto com qualidade de estúdio via RMBG-1.4\"\"\"
     try:
         orig_size = img.size
@@ -108,6 +105,7 @@ def remove_background_neural(img: Image.Image) -> Image.Image:
         
         with torch.no_grad():
             output = rmbg_model(input_tensor)
+            # Desempacotar lista aninhada do modelo RMBG-1.4 com segurança
             while isinstance(output, (list, tuple)):
                 output = output[0]
             if hasattr(output, "sigmoid"):
@@ -115,29 +113,34 @@ def remove_background_neural(img: Image.Image) -> Image.Image:
             else:
                 preds = torch.sigmoid(output).cpu().squeeze()
         
+        # Converte para PIL Image com escala 0..255
         full_mask = TF.to_pil_image(preds)
         cropped_mask = full_mask.crop((paste_x, paste_y, paste_x + new_w, paste_y + new_h))
         mask = cropped_mask.resize(orig_size, Image.BILINEAR)
         
         rgba_img = img.convert("RGBA")
         rgba_img.putalpha(mask)
+        logs.append(f"✅ Recorte RMBG-1.4 concluído com sucesso ({orig_size[0]}x{orig_size[1]}px). Fundo removido.")
         return rgba_img
     except Exception as e:
-        print(f"Aviso no recorte neural: {e}. Usando imagem direta com alpha...")
+        err_msg = f"❌ Falha no recorte RMBG-1.4: {e}"
+        print(err_msg)
+        logs.append(err_msg)
         if img.mode != "RGBA":
             return img.convert("RGBA")
         return img
 
-def prepare_for_triposr(rgba_img: Image.Image) -> Image.Image:
+def prepare_for_triposr(rgba_img: Image.Image, logs: list) -> Image.Image:
     \"\"\"Centraliza com 85% de escala e mescla contra cinza neutro (0.5)\"\"\"
     scaled_img = resize_foreground(rgba_img, 0.85)
     img_np = np.array(scaled_img).astype(np.float32) / 255.0
     alpha = img_np[:, :, 3:4]
     rgb = img_np[:, :, :3]
     blended = rgb * alpha + (1.0 - alpha) * 0.5
+    logs.append(f"✅ Enquadramento ótico TripoSR aplicado (escala 85% e alpha blend 0.5 cinza neutro).")
     return Image.fromarray((blended * 255.0).astype(np.uint8))
 
-# 7. Servidor FastAPI
+# 7. Servidor FastAPI com Telemetria e Logs Detalhados
 app = FastAPI(title="TECX LABS 3D Engine")
 
 app.add_middleware(
@@ -154,7 +157,7 @@ app.add_middleware(
 def health_check():
     return {
         "status": "online",
-        "system": "TECX LABS 3D Neural Suite",
+        "system": "TECX LABS 3D Neural Suite v2.2",
         "ready": True
     }
 
@@ -167,31 +170,52 @@ async def generate_3d(
     threshold: str = Form(None)
 ):
     start_time = time.time()
+    server_logs = []
     try:
         contents = await image.read()
         input_img = Image.open(io.BytesIO(contents))
+        server_logs.append(f"📥 Imagem recebida pelo servidor ({input_img.size[0]}x{input_img.size[1]}px, formato: {input_img.format}).")
         
-        print(f"\\n🖼️ Nova Imagem Recebida ({input_img.size[0]}x{input_img.size[1]}px). Processando...")
-        rgba_img = remove_background_neural(input_img)
-        tripo_input = prepare_for_triposr(rgba_img)
+        # 1. Recorte Neural de Fundo
+        rgba_img = remove_background_neural(input_img, server_logs)
+        
+        # Salvar preview da imagem segmentada em base64 para inspeção no app
+        buf = io.BytesIO()
+        rgba_img.save(buf, format="PNG")
+        seg_preview_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+        
+        # 2. Preparação Ótica
+        tripo_input = prepare_for_triposr(rgba_img, server_logs)
         
         res_map = {"low": 128, "mid": 256, "high": 320}
         res = res_map.get(quality, 256)
-        mc_thresh = 0.18
+        server_logs.append(f"⚙️ Iniciando inferência neural 360° em resolução {res}x{res}x{res}...")
         
-        print(f"⚙️ Inferência Neural 360° (Resolução: {res}, Threshold: {mc_thresh})...")
+        # 3. Inferência Neural (Passa lista de imagens conforme especificação oficial do TSR)
         with torch.no_grad():
-            scene_codes = tripo_model(tripo_input, device=device)
-            try:
-                mesh = tripo_model.extract_mesh(scene_codes, True, resolution=res, threshold=mc_thresh)[0]
-            except TypeError:
-                mesh = tripo_model.extract_mesh(scene_codes, True, resolution=res)[0]
+            scene_codes = tripo_model([tripo_input], device=device)
+            server_logs.append(f"🧠 Tensores volumétricos calculados pelo backbone TripoSR.")
+            
+            # 4. Extração de Isosuperfície com cores de vértice
+            mesh = tripo_model.extract_mesh(scene_codes, True, resolution=res)[0]
+            server_logs.append(f"📐 Malha 3D extraída via Marching Cubes ({len(mesh.vertices)} vértices, {len(mesh.faces)} faces).")
         
-        print("🧹 Otimizando Topologia...")
+        # 5. Pós-processamento e Limpeza (Remoção de lixo e fragmentos flutuantes)
+        try:
+            # Eliminar ruídos e fragmentos desconectados, mantendo apenas a malha principal
+            comps = mesh.split(only_watertight=False)
+            if len(comps) > 1:
+                comps = sorted(comps, key=lambda c: len(c.faces), reverse=True)
+                mesh = comps[0]
+                server_logs.append(f"🧹 Removidos {len(comps) - 1} fragmentos residuais flutuantes. Malha principal isolada.")
+        except Exception as e:
+            server_logs.append(f"ℹ️ Limpeza de fragmentos: {e}")
+
         try:
             trimesh.smoothing.filter_laplacian(mesh, iterations=2)
+            server_logs.append(f"🧹 Suavização laplaciana aplicada com sucesso.")
         except Exception as e:
-            print(f"Aviso suavização: {e}")
+            server_logs.append(f"⚠️ Aviso na suavização: {e}")
             
         output_obj = "outputs/model.obj"
         output_glb = "outputs/model.glb"
@@ -199,7 +223,7 @@ async def generate_3d(
         mesh.export(output_glb)
         
         elapsed = round(time.time() - start_time, 2)
-        print(f"✨ Concluído em {elapsed}s! Vértices: {len(mesh.vertices)}, Faces: {len(mesh.faces)}")
+        server_logs.append(f"✨ Geração concluída com sucesso em {elapsed}s!")
         
         with open(output_glb, "rb") as f:
             glb_bytes = f.read()
@@ -218,6 +242,8 @@ async def generate_3d(
                 }
             },
             "glb_base64": glb_b64,
+            "segmented_preview": seg_preview_b64,
+            "server_logs": server_logs,
             "downloads": {
                 "glb": "/outputs/model.glb",
                 "obj": "/outputs/model.obj"
@@ -225,8 +251,9 @@ async def generate_3d(
         }
     except Exception as e:
         tb = traceback.format_exc()
+        server_logs.append(f"💥 ERRO CRÍTICO NO SERVIDOR: {e}")
         print(f"❌ ERRO NA GERAÇÃO 3D:\\n{tb}")
-        return JSONResponse(status_code=500, content={"error": str(e), "traceback": tb})
+        return JSONResponse(status_code=500, content={"error": str(e), "traceback": tb, "server_logs": server_logs})
 
 @app.get("/outputs/{filename}")
 def get_file(filename: str):
@@ -235,7 +262,7 @@ def get_file(filename: str):
         return FileResponse(path)
     return JSONResponse(status_code=404, content={"error": "Arquivo não encontrado"})
 
-# 8. Túnel Cloudflare Seguro
+# 8. Túnel Seguro
 os.system("pkill -f cloudflared")
 tunnel_proc = subprocess.Popen(
     ["cloudflared", "tunnel", "--url", "http://localhost:8000"],

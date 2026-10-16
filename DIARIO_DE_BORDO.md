@@ -101,16 +101,35 @@
 
 ---
 
+---
+
+## 🛠️ Versão 2.2 — Diagnóstico em Tempo Real & Isolamento de Malha
+
+1. **Botão de Logs & Telemetria em 1 Clique (`LogModal`):**
+   - Adicionado botão **"Logs"** na barra superior (`TopNavbar`) e atalho em caso de erro.
+   - Modal completo que exibe:
+     - Preview visual da imagem segmentada sem fundo (para conferir se a IA recortou a picareta perfeitamente).
+     - Logs passo a passo do servidor remoto (tempo de recorte, contagem de tensores, resolução marching cubes).
+     - Logs do cliente local / gateway.
+     - Botão **"Copiar Logs para Suporte"** que coloca todo o relatório técnico na área de transferência com 1 clique.
+
+2. **Causa Raiz do "Cubo / Caixa" e Ruído Eliminados:**
+   - **Causa do Cubo:** Na versão anterior, o fundo opaco não era removido em desenhos e fotos com sombras; a rede neural tratava o fundo retangular como matéria sólida, esculpindo uma caixa/bloco com a textura da picareta projetada.
+   - **Solução:** O pipeline agora isola a silhueta com `RMBG-1.4`, aplica escala ótica de 85%, mescla contra fundo cinza neutro (0.5) exato do TripoSR e extrai a isosuperfície em `0.0`.
+   - **Limpeza de Fragmentos Flutuantes ("Lixaiada"):** Aplicação de filtro de componentes conexos (`trimesh.split`) para manter estritamente a malha da ferramenta/arma e descartar pequenos ruídos residuais gerados pelo marching cubes.
+
+---
+
 ## 📊 Tabela Comparativa de Evolução
 
-| Característica | Versão 1.5 (OpenCV) | Versão 2.0 (RMBG-1.4 + TripoSR) |
+| Característica | Versão 1.5 (OpenCV) | Versão 2.2 (RMBG-1.4 + TripoSR + Telemetria) |
 | :--- | :--- | :--- |
-| **Recorte de Fundo** | OpenCV Otsu (Falhava em desenhos) | IA Neural RMBG-1.4 (Perfeição em 0.2s) |
-| **Geometria Resultante** | Bloco cúbico maciço deformado | Modelo 3D volumétrico real 360° |
-| **Isosuperfície** | skimage (eixos invertidos, level 0.0) | PyMCubes C++ (Threshold 0.18 calibrado) |
-| **Estabilidade no Colab** | Quebrava imports e dependências | Rodou de primeira sem nenhum erro |
-| **Interface de Visualização**| Sem eixos, poluída com abas | Padrão Tripo AI com Gizmo XYZ e Dock limpo |
-| **Exportação** | Manual / Falha de CORS | 1 clique (.GLB e .OBJ) via Gateway Node |
+| **Recorte de Fundo** | OpenCV Otsu (Falhava em desenhos) | IA Neural RMBG-1.4 (Isolamento de silhueta real) |
+| **Geometria Resultante** | Bloco cúbico maciço deformado ("Cubo") | Malha 3D volumétrica da arma sem caixa |
+| **Isosuperfície** | skimage (level invertido) | PyMCubes C++ (Threshold zero-centered 0.0) |
+| **Ruídos Flutuantes** | Deixava fragmentos ("lixaiada") | Filtro de componentes conexos + Suavização |
+| **Diagnóstico** | Nulo / silencioso | Botão de Logs com preview do recorte e 1-click copy |
+| **Interface** | Sem eixos, confusa | Padrão Tripo AI com Gizmo XYZ e Dock limpo |
 
 ---
 

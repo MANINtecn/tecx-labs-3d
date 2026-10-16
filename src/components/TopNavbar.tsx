@@ -5,20 +5,25 @@ import {
   Server,
   Activity,
   Plus,
+  FileText,
 } from 'lucide-react';
 
 interface TopNavbarProps {
   onOpenUpload: () => void;
   onOpenPythonHub: () => void;
+  onOpenLogs: () => void;
   isBackendConnected: boolean;
   modelName?: string;
+  hasLogs?: boolean;
 }
 
 export const TopNavbar: React.FC<TopNavbarProps> = ({
   onOpenUpload,
   onOpenPythonHub,
+  onOpenLogs,
   isBackendConnected,
   modelName,
+  hasLogs,
 }) => {
   return (
     <header className="absolute top-0 left-0 right-0 z-20 h-16 bg-[#080b12]/95 border-b border-slate-800/80 px-4 sm:px-6 flex items-center justify-between select-none shadow-md backdrop-blur-md">
@@ -76,6 +81,22 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
 
       {/* Ações da Navbar */}
       <div className="flex items-center gap-2">
+        <button
+          onClick={onOpenLogs}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-mono transition-colors cursor-pointer ${
+            hasLogs
+              ? 'bg-cyan-950/60 hover:bg-cyan-900/60 text-cyan-300 border-cyan-500/50 shadow-sm shadow-cyan-500/20'
+              : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-700/80'
+          }`}
+          title="Ver diagnóstico, preview do recorte e logs detalhados do sistema"
+        >
+          <FileText className="w-3.5 h-3.5 text-cyan-400" />
+          <span className="hidden sm:inline font-semibold">Logs</span>
+          {hasLogs && (
+            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping ml-0.5" />
+          )}
+        </button>
+
         <button
           onClick={onOpenPythonHub}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-700/80 text-xs font-mono transition-colors cursor-pointer"

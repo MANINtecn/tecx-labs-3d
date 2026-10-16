@@ -17,6 +17,7 @@ import { TopNavbar } from './components/TopNavbar';
 import { BottomControlDock } from './components/BottomControlDock';
 import { MetricsHud } from './components/MetricsHud';
 import { PythonHubModal } from './components/PythonHubModal';
+import { LogModal } from './components/LogModal';
 
 import {
   UploadCloud,
@@ -26,6 +27,7 @@ import {
   Image as ImageIcon,
   X,
   Zap,
+  FileText,
 } from 'lucide-react';
 
 export default function App() {
@@ -57,6 +59,19 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [processingStatus, setProcessingStatus] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Sistema de Diagnóstico e Logs em Tempo Real
+  const [isLogModalOpen, setIsLogModalOpen] = useState<boolean>(false);
+  const [serverLogs, setServerLogs] = useState<string[]>([]);
+  const [segmentedPreview, setSegmentedPreview] = useState<string | null>(null);
+  const [clientLogs, setClientLogs] = useState<string[]>([]);
+
+  const addClientLog = useCallback((msg: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    const entry = `[${timestamp}] ${msg}`;
+    console.log(`[TECX CLIENT] ${entry}`);
+    setClientLogs((prev) => [...prev.slice(-49), entry]);
+  }, []);
 
   // Drag & Drop
   const [isWindowDragging, setIsWindowDragging] = useState<boolean>(false);
@@ -229,12 +244,15 @@ export default function App() {
     setIsProcessing(true);
     setErrorMessage(null);
     setProcessingStatus(`Enviando "${name}" para o cluster neural...`);
+    addClientLog(`Iniciando geração de "${name}" (Qualidade: ${targetQuality})`);
+    addClientLog(`Servidor de destino: ${backendUrl.trim()}`);
 
     try {
       const blob = await (await fetch(imageSource)).blob();
       const file = new File([blob], `${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}.png`, {
         type: blob.type || 'image/png',
       });
+      addClientLog(`Imagem empacotada: ${file.size} bytes (${file.type})`);
 
       const formData = new FormData();
       formData.append('image', file);
@@ -243,6 +261,7 @@ export default function App() {
       formData.append('targetBackendUrl', backendUrl.trim());
 
       setProcessingStatus(`Isolando silhueta e reconstruindo geometria 360°...`);
+      addClientLog(`Despachando POST /api/neural/generate-3d...`);
 
       const res = await fetch('/api/neural/generate-3d', {
         method: 'POST',
@@ -251,10 +270,20 @@ export default function App() {
 
       const data = await res.json();
 
+      if (data.server_logs && Array.isArray(data.server_logs)) {
+        setServerLogs(data.server_logs);
+      }
+      if (data.segmented_preview) {
+        setSegmentedPreview(data.segmented_preview);
+      }
+
       if (!res.ok || !data.success) {
+        addClientLog(`❌ Erro retornado pela API (${res.status}): ${data.error || 'Falha desconhecida'}`);
         throw new Error(data.error || 'O servidor neural não conseguiu processar a imagem.');
       }
 
+      addClientLog(`✅ Modelo gerado pelo servidor em ${data.metrics?.elapsed_seconds || '?'}s.`);
+      addClientLog(`Polígonos: ${data.metrics?.triangles} faces, ${data.metrics?.vertices} vértices.`);
       setProcessingStatus('Renderizando modelo 3D no Viewport WebGL...');
 
       const binaryStr = atob(data.glbBase64);
@@ -265,9 +294,12 @@ export default function App() {
       }
 
       loadGlbIntoScene(bytes.buffer, name, data.metrics);
+      addClientLog(`🎉 Modelo 3D carregado com sucesso na cena WebGL!`);
     } catch (err: any) {
       console.error('Falha na geração 3D neural:', err);
-      setErrorMessage(err.message || 'Falha ao processar com o servidor neural.');
+      const msg = err.message || 'Falha ao processar com o servidor neural.';
+      setErrorMessage(msg);
+      addClientLog(`❌ Exceção capturada: ${msg}`);
       setIsProcessing(false);
       setProcessingStatus('');
     }
@@ -348,8 +380,10 @@ export default function App() {
       <TopNavbar
         onOpenUpload={() => fileInputRef.current?.click()}
         onOpenPythonHub={() => setIsPythonHubOpen(true)}
+        onOpenLogs={() => setIsLogModalOpen(true)}
         isBackendConnected={isBackendConnected}
         modelName={activeModelName}
+        hasLogs={serverLogs.length > 0 || clientLogs.length > 0}
       />
 
       {/* 2. HUD de Métricas Reais do Modelo */}
@@ -519,11 +553,20 @@ export default function App() {
         </div>
       )}
 
-      {/* Banner de Erro */}
+      {/* Banner de Erro com Link Direto para Diagnóstico/Logs */}
       {errorMessage && (
-        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 bg-red-950/90 border border-red-500/60 rounded-xl px-4 py-3 shadow-2xl flex items-center gap-3 text-xs text-red-200 max-w-lg">
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 bg-red-950/95 border border-red-500/60 rounded-xl px-4 py-3 shadow-2xl flex items-center gap-3 text-xs text-red-200 max-w-lg backdrop-blur-md">
           <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
-          <div className="flex-1 font-sans">{errorMessage}</div>
+          <div className="flex-1 font-sans">
+            <div>{errorMessage}</div>
+            <button
+              onClick={() => setIsLogModalOpen(true)}
+              className="text-cyan-400 hover:text-cyan-300 font-mono text-[11px] underline mt-1 flex items-center gap-1 cursor-pointer"
+            >
+              <FileText className="w-3 h-3" />
+              <span>Ver Diagnóstico e Copiar Logs para Suporte →</span>
+            </button>
+          </div>
           <button
             onClick={() => setErrorMessage(null)}
             className="text-red-400 hover:text-white text-xs font-bold px-1 cursor-pointer"
@@ -565,7 +608,7 @@ export default function App() {
       {isProcessing && (
         <div className="absolute top-20 right-4 z-40 bg-[#0b0f19]/95 border border-cyan-500/60 rounded-2xl p-4 shadow-2xl flex items-center gap-3 max-w-md backdrop-blur-md">
           <div className="w-5 h-5 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin shrink-0" />
-          <div>
+          <div className="flex-1">
             <p className="text-xs font-mono font-bold text-cyan-300">
               {processingStatus || 'Processando modelo 3D...'}
             </p>
@@ -573,6 +616,12 @@ export default function App() {
               Isolamento de silhueta e escultura volumétrica 360°
             </p>
           </div>
+          <button
+            onClick={() => setIsLogModalOpen(true)}
+            className="text-[11px] font-mono text-cyan-400 hover:text-cyan-300 underline shrink-0 cursor-pointer ml-1"
+          >
+            Ver Logs
+          </button>
         </div>
       )}
 
@@ -584,6 +633,17 @@ export default function App() {
         onUpdateBackendUrl={handleUpdateBackendUrl}
         isBackendConnected={isBackendConnected}
         onTestConnection={() => testBackendConnection(backendUrl)}
+      />
+
+      {/* Modal de Diagnóstico e Logs em Tempo Real (1-Click Copy para Suporte) */}
+      <LogModal
+        isOpen={isLogModalOpen}
+        onClose={() => setIsLogModalOpen(false)}
+        serverLogs={serverLogs}
+        segmentedPreview={segmentedPreview}
+        clientLogs={clientLogs}
+        backendUrl={backendUrl}
+        isBackendConnected={isBackendConnected}
       />
     </div>
   );
