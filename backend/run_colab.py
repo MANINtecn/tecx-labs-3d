@@ -7,8 +7,10 @@ COLAB_COMPLETE_SCRIPT = '''# ===================================================
 # TECX LABS 3D - SERVIDOR NEURAL PROPRIETÁRIO (TECX CORE ENGINE v2.2)
 # ===============================================================
 
-# 1. Instalar bibliotecas essenciais sem conflito de compilação
-!pip install -q "torchvision" "transformers" "omegaconf" "einops" "huggingface_hub" "trimesh" "PyMCubes" "scipy" "networkx" "fastapi" "uvicorn[standard]" "python-multipart" "nest_asyncio"
+# 1. Instalar bibliotecas essenciais e compilar o torchmcubes nativo com CUDA
+!pip install -q --upgrade setuptools
+!pip install -q git+https://github.com/tatsy/torchmcubes.git
+!pip install -q "torchvision" "transformers" "omegaconf" "einops" "huggingface_hub" "trimesh" "fast-simplification" "PyMCubes" "scipy" "networkx" "fastapi" "uvicorn[standard]" "python-multipart" "nest_asyncio"
 
 import nest_asyncio
 nest_asyncio.apply()
@@ -23,30 +25,34 @@ nest_asyncio.apply()
 !wget -q -nc https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
 !dpkg -i cloudflared-linux-amd64.deb > /dev/null 2>&1
 
-# 4. Injetar módulo virtual torchmcubes (Zero-centered isosurface)
+# 4. Configurar Marching Cubes (Nativo CUDA com fallback seguro à prova de cubo)
 import sys, types, base64, traceback
 import torch
 import numpy as np
-import mcubes
 
-fake_torchmcubes = types.ModuleType("torchmcubes")
-
-def marching_cubes_adapter(volume, threshold=0.0):
-    if isinstance(volume, torch.Tensor):
-        vol_np = volume.detach().cpu().numpy()
-        device = volume.device
-    else:
-        vol_np = np.asarray(volume)
-        device = "cuda:0" if torch.cuda.is_available() else "cpu"
-
-    # TripoSR já subtrai o threshold internamente; a isosuperfície exata é 0.0
-    verts, faces = mcubes.marching_cubes(vol_np, 0.0)
-    verts_t = torch.from_numpy(verts.copy()).float().to(device)
-    faces_t = torch.from_numpy(faces.copy().astype(np.int64)).long().to(device)
-    return verts_t, faces_t
-
-fake_torchmcubes.marching_cubes = marching_cubes_adapter
-sys.modules["torchmcubes"] = fake_torchmcubes
+try:
+    import torchmcubes
+    print("✅ torchmcubes nativo com CUDA compilado com sucesso!")
+except Exception as e:
+    print(f"⚠️ torchmcubes nativo não encontrado ({e}). Ativando adaptador seguro com isolamento de borda...")
+    import mcubes
+    fake_torchmcubes = types.ModuleType("torchmcubes")
+    def marching_cubes_adapter(volume, threshold=0.0):
+        if isinstance(volume, torch.Tensor):
+            vol_np = volume.detach().cpu().numpy()
+            device = volume.device
+        else:
+            vol_np = np.asarray(volume)
+            device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        # Borda de segurança negativa para NUNCA criar paredes de caixa
+        padded = np.pad(vol_np, 1, mode="constant", constant_values=-100.0)
+        verts, faces = mcubes.marching_cubes(padded, 0.0)
+        verts = verts - 1.0
+        verts_t = torch.from_numpy(verts.copy()).float().to(device)
+        faces_t = torch.from_numpy(faces.copy().astype(np.int64)).long().to(device)
+        return verts_t, faces_t
+    fake_torchmcubes.marching_cubes = marching_cubes_adapter
+    sys.modules["torchmcubes"] = fake_torchmcubes
 
 # 5. Inicialização dos Motores Neurais na GPU
 sys.path.append("/content/TripoSR")
@@ -198,22 +204,50 @@ async def generate_3d(
             
             # 4. Extração de Isosuperfície com cores de vértice
             mesh = tripo_model.extract_mesh(scene_codes, True, resolution=res)[0]
-            server_logs.append(f"📐 Malha 3D extraída via Marching Cubes ({len(mesh.vertices)} vértices, {len(mesh.faces)} faces).")
+            server_logs.append(f"📐 Malha bruta extraída via Marching Cubes ({len(mesh.vertices)} vértices, {len(mesh.faces)} faces).")
         
-        # 5. Pós-processamento e Limpeza (Remoção de lixo e fragmentos flutuantes)
+        # 5. Pipeline de Engenharia Reversa (Estilo Meshy / Tripo AI Pro)
+        # A. Eliminar ruídos e fragmentos soltos ("lixaiada"), isolando apenas o corpo principal da arma
         try:
-            # Eliminar ruídos e fragmentos desconectados, mantendo apenas a malha principal
             comps = mesh.split(only_watertight=False)
             if len(comps) > 1:
                 comps = sorted(comps, key=lambda c: len(c.faces), reverse=True)
                 mesh = comps[0]
-                server_logs.append(f"🧹 Removidos {len(comps) - 1} fragmentos residuais flutuantes. Malha principal isolada.")
+                server_logs.append(f"🧹 Descartados {len(comps) - 1} fragmentos flutuantes. Malha da arma isolada.")
         except Exception as e:
             server_logs.append(f"ℹ️ Limpeza de fragmentos: {e}")
 
+        # B. Retopologia e Decimação Low-Poly (Gera malha limpa para jogos, sem o milhão de polígonos)
+        target_faces = {"low": 8000, "mid": 20000, "high": 50000}.get(quality, 20000)
+        if len(mesh.faces) > target_faces:
+            try:
+                import fast_simplification
+                reduction = 1.0 - (target_faces / len(mesh.faces))
+                simp_verts, simp_faces = fast_simplification.simplify(
+                    mesh.vertices, mesh.faces, target_reduction=reduction
+                )
+                mesh = trimesh.Trimesh(vertices=simp_verts, faces=simp_faces, process=False)
+                server_logs.append(f"📉 Retopologia Low-Poly aplicada: reduzido para {len(mesh.faces)} triângulos ({quality}).")
+
+                # C. Re-amostragem das cores neurais na nova malha Low-Poly
+                with torch.no_grad():
+                    v_tensor = torch.from_numpy(mesh.vertices).float().to(device)
+                    sampled_colors = tripo_model.renderer.query_triplane(
+                        tripo_model.decoder,
+                        v_tensor,
+                        scene_codes[0]
+                    )["color"]
+                    mesh.visual = trimesh.visual.ColorVisuals(
+                        vertex_colors=(sampled_colors.cpu().numpy() * 255.0).clip(0, 255).astype(np.uint8)
+                    )
+                    server_logs.append(f"🎨 Cores e texturas neurais preservadas na malha Low-Poly.")
+            except Exception as e:
+                server_logs.append(f"ℹ️ Decimação Low-Poly: {e}")
+
+        # D. Suavização de superfície laplaciana suave
         try:
-            trimesh.smoothing.filter_laplacian(mesh, iterations=2)
-            server_logs.append(f"🧹 Suavização laplaciana aplicada com sucesso.")
+            trimesh.smoothing.filter_laplacian(mesh, iterations=1)
+            server_logs.append(f"✨ Acabamento de superfície aplicado com sucesso.")
         except Exception as e:
             server_logs.append(f"⚠️ Aviso na suavização: {e}")
             
