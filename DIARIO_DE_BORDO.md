@@ -64,6 +64,16 @@
 - Aplicação de `filter_laplacian(mesh, iterations=2)` para suavizar voxels.
 - Exportação atômica em `.glb` e `.obj` e empacotamento em Base64 para carregamento instantâneo via gateway Node sem erro de CORS.
 
+#### 5. Correção de Desempacotamento do Tensor RMBG-1.4
+- **Diagnóstico:** O modelo RMBG-1.4 do HuggingFace retorna uma estrutura aninhada `list[list[Tensor]]`. A chamada direta de `[-1].sigmoid()` gerava `'list' object has no attribute 'sigmoid'`.
+- **Solução:** Implementado desempacotamento recursivo automático:
+  ```python
+  while isinstance(output, (list, tuple)):
+      output = output[0]
+  preds = torch.sigmoid(output).cpu().squeeze()
+  ```
+- **Fallback de Segurança:** Em caso de exceção no recorte, o pipeline continua sem interromper a geração 3D.
+
 ---
 
 ## 🖥️ Reformulação da Interface (Padrão Tripo AI)

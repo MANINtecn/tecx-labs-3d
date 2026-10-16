@@ -90,31 +90,43 @@ os.makedirs("outputs", exist_ok=True)
 # 6. Pipeline de Pré-processamento de Imagem
 def remove_background_neural(img: Image.Image) -> Image.Image:
     \"\"\"Isola a silhueta da picareta/objeto com qualidade de estúdio via RMBG-1.4\"\"\"
-    orig_size = img.size
-    input_img = img.convert("RGB")
-    w, h = orig_size
-    scale = 1024.0 / max(w, h)
-    new_w, new_h = int(w * scale), int(h * scale)
-    resized_input = input_img.resize((new_w, new_h), Image.BILINEAR)
-    
-    canvas = Image.new("RGB", (1024, 1024), (255, 255, 255))
-    paste_x = (1024 - new_w) // 2
-    paste_y = (1024 - new_h) // 2
-    canvas.paste(resized_input, (paste_x, paste_y))
-    
-    input_tensor = TF.to_tensor(canvas).unsqueeze(0).to(device)
-    input_tensor = TF.normalize(input_tensor, [0.5, 0.5, 0.5], [1.0, 1.0, 1.0])
-    
-    with torch.no_grad():
-        preds = rmbg_model(input_tensor)[-1].sigmoid().cpu()
-    
-    full_mask = TF.to_pil_image(preds[0][0])
-    cropped_mask = full_mask.crop((paste_x, paste_y, paste_x + new_w, paste_y + new_h))
-    mask = cropped_mask.resize(orig_size, Image.BILINEAR)
-    
-    rgba_img = img.convert("RGBA")
-    rgba_img.putalpha(mask)
-    return rgba_img
+    try:
+        orig_size = img.size
+        input_img = img.convert("RGB")
+        w, h = orig_size
+        scale = 1024.0 / max(w, h)
+        new_w, new_h = max(16, int(w * scale)), max(16, int(h * scale))
+        resized_input = input_img.resize((new_w, new_h), Image.BILINEAR)
+        
+        canvas = Image.new("RGB", (1024, 1024), (255, 255, 255))
+        paste_x = (1024 - new_w) // 2
+        paste_y = (1024 - new_h) // 2
+        canvas.paste(resized_input, (paste_x, paste_y))
+        
+        input_tensor = TF.to_tensor(canvas).unsqueeze(0).to(device)
+        input_tensor = TF.normalize(input_tensor, [0.5, 0.5, 0.5], [1.0, 1.0, 1.0])
+        
+        with torch.no_grad():
+            output = rmbg_model(input_tensor)
+            while isinstance(output, (list, tuple)):
+                output = output[0]
+            if hasattr(output, "sigmoid"):
+                preds = output.sigmoid().cpu().squeeze()
+            else:
+                preds = torch.sigmoid(output).cpu().squeeze()
+        
+        full_mask = TF.to_pil_image(preds)
+        cropped_mask = full_mask.crop((paste_x, paste_y, paste_x + new_w, paste_y + new_h))
+        mask = cropped_mask.resize(orig_size, Image.BILINEAR)
+        
+        rgba_img = img.convert("RGBA")
+        rgba_img.putalpha(mask)
+        return rgba_img
+    except Exception as e:
+        print(f"Aviso no recorte neural: {e}. Usando imagem direta com alpha...")
+        if img.mode != "RGBA":
+            return img.convert("RGBA")
+        return img
 
 def prepare_for_triposr(rgba_img: Image.Image) -> Image.Image:
     \"\"\"Centraliza com 85% de escala e mescla contra cinza neutro (0.5)\"\"\"
